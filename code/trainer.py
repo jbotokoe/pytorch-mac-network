@@ -106,6 +106,7 @@ class Trainer():
                                             shuffle=False, num_workers=cfg.WORKERS, collate_fn=collate_fn)
 
          # load model
+        self.epoch_restart = None
         if cp_path is not None:
             for root, dirs, files in os.walk(cp_path): # cp_path is a dir, hence find pth file
                 for f in [i for i in files if not (i.startswith("."))]: # ignore hidden files (e.g. on MacOS .DS_Store)

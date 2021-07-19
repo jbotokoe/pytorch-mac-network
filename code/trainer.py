@@ -241,7 +241,10 @@ class Trainer():
     def train(self):
         cfg = self.cfg
         print("Start Training")
-        for epoch in range(self.max_epochs):
+        starting_epoch = 0
+        if self.epoch_restart:
+            starting_epoch = self.epoch_restart
+        for epoch in range(starting_epoch, self.max_epochs):
             dict = self.train_epoch(epoch)
             self.reduce_lr()
             self.log_results(epoch, dict)

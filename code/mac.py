@@ -272,7 +272,7 @@ class InputUnit(nn.Module):
         # get question and contextual word embeddings
         embed = self.encoder_embed(question)
         embed = self.embedding_dropout(embed)
-        embed = nn.utils.rnn.pack_padded_sequence(embed, question_len, batch_first=True, enforce_sorted=False)
+        embed = nn.utils.rnn.pack_padded_sequence(embed, question_len, batch_first=True) #, enforce_sorted=False), enforce_sorted not supported by tohinz package versions
 
         contextual_words, (question_embedding, _) = self.encoder(embed)
         if self.bidirectional:

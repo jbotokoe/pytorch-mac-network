@@ -16,8 +16,10 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 
 from utils import mkdir_p, save_model, load_vocab
-from datasets import ClevrDataset, collate_fn
+from datasets import ClevrDataset, collate_fn, ClevrDialogDataset
 import mac
+
+from copy import deepcopy
 
 
 class Logger(object):
@@ -37,9 +39,26 @@ class Logger(object):
         #you might want to specify some extra behavior here.
         pass
 
+def load_model(cpfile, cfg):
+    if cfg.CUDA:
+        cpdata = torch.load(cpfile)
+    else:
+        cpdata = torch.load(cpfile, map_location=torch.device('cpu'))
+    vocab = load_vocab(cfg)
+
+    model = mac.MACNetwork(cfg, cfg.TRAIN.MAX_STEPS, vocab)    
+    model.load_state_dict(cpdata['model'])
+   
+    if cfg.CUDA:
+        model = model.cuda()
+
+    optimizer = torch.optim.Adam(model.parameters(), lr=cfg.TRAIN.LEARNING_RATE)
+    if cpdata['optim'] is not None:
+        optimizer.load_state_dict(cpdata['optim'])        
+    return model, vocab, optimizer
 
 class Trainer():
-    def __init__(self, log_dir, cfg):
+    def __init__(self, log_dir, cfg, cp_path=None):
 
         self.path = log_dir
         self.cfg = cfg
@@ -63,23 +82,43 @@ class Trainer():
         self.batch_size = cfg.TRAIN.BATCH_SIZE
         self.lr = cfg.TRAIN.LEARNING_RATE
 
-        torch.cuda.set_device(self.gpus[0])
-        cudnn.benchmark = True
+        if cfg.CUDA:
+            torch.cuda.set_device(self.gpus[0]) #
+            cudnn.benchmark = True #
 
         # load dataset
-        self.dataset = ClevrDataset(data_dir=self.data_dir, split="train")
-        self.dataloader = DataLoader(dataset=self.dataset, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=True,
-                                       num_workers=cfg.WORKERS, drop_last=True, collate_fn=collate_fn)
+        if cfg.TRAIN.CLEVR_DIALOG:
+            self.dataset = ClevrDialogDataset(data_dir=self.data_dir, split="train")
+            self.dataset_val = ClevrDialogDataset(data_dir=self.data_dir, split="val")
+            
+            self.dataloader = DataLoader(dataset=self.dataset, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=True,
+                                        num_workers=cfg.WORKERS, drop_last=True, collate_fn=ClevrDialogDataset.collate_fn)            
+            self.dataloader_val = DataLoader(dataset=self.dataset_val, batch_size=128, drop_last=True,
+                                            shuffle=False, num_workers=cfg.WORKERS, collate_fn=ClevrDialogDataset.collate_fn)            
 
-        self.dataset_val = ClevrDataset(data_dir=self.data_dir, split="val")
-        self.dataloader_val = DataLoader(dataset=self.dataset_val, batch_size=200, drop_last=True,
-                                         shuffle=False, num_workers=cfg.WORKERS, collate_fn=collate_fn)
+        else:
+            self.dataset = ClevrDataset(data_dir=self.data_dir, split="train")
+            self.dataset_val = ClevrDataset(data_dir=self.data_dir, split="val")
 
-        # load model
-        self.vocab = load_vocab(cfg)
-        self.model, self.model_ema = mac.load_MAC(cfg, self.vocab)
-        self.weight_moving_average(alpha=0)
-        self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr)
+            self.dataloader = DataLoader(dataset=self.dataset, batch_size=cfg.TRAIN.BATCH_SIZE, shuffle=True,
+                                        num_workers=cfg.WORKERS, drop_last=True, collate_fn=collate_fn)
+            self.dataloader_val = DataLoader(dataset=self.dataset_val, batch_size=200, drop_last=True,
+                                            shuffle=False, num_workers=cfg.WORKERS, collate_fn=collate_fn)
+
+         # load model
+        if cp_path is not None:
+            for root, dirs, files in os.walk(cp_path): # cp_path is a dir, hence find pth file
+                for f in [i for i in files if not (i.startswith("."))]: # ignore hidden files (e.g. on MacOS .DS_Store)
+                    cp_path = os.path.join(root, f)
+            last_epoch = int(cp_path.split('.')[0][-6:]) # retrieve epoch number
+            self.epoch_restart = last_epoch + 1 # increment by one as last_epoch was successful
+            self.model, self.vocab, self.optimizer = load_model(cp_path, self.cfg)            
+            self.model_ema = deepcopy(self.model)         
+        else:
+            self.vocab = load_vocab(cfg) # 
+            self.model, self.model_ema = mac.load_MAC(cfg, self.vocab) #
+            self.weight_moving_average(alpha=0) #
+            self.optimizer = optim.Adam(self.model.parameters(), lr=self.lr) #
 
         self.previous_best_acc = 0.0
         self.previous_best_epoch = 0

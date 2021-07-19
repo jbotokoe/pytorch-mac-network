@@ -29,6 +29,10 @@ __C.TRAIN.PATIENCE = 5
 __C.TRAIN.VAR_DROPOUT = False
 __C.TRAIN = dict(__C.TRAIN)
 
+__C.TRAIN.CLEVR_DIALOG = False
+__C.TRAIN.RETAIN_TURN_MEMORY = False
+__C.TRAIN.NUM_ANSWERS = 29
+
 # Dataset options
 __C.DATASET = edict()
 __C.DATASET.DATA_DIR = ''

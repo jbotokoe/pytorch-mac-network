@@ -28,7 +28,9 @@ class ClevrDataset(data.Dataset):
 
         with open(os.path.join(data_dir, '{}.pkl'.format(split)), 'rb') as f:
             self.data = pickle.load(f)
-        self.img = h5py.File(os.path.join(data_dir, '{}_features.h5'.format(split)), 'r')['features']
+        if split == 'val':
+            split = 'train'
+        self.img = h5py.File(os.path.join('data', '{}_features.h5'.format(split)), 'r')['features']
 
     def __getitem__(self, index):
         imgfile, question, answer, family = self.data[index]
@@ -42,7 +44,7 @@ class ClevrDataset(data.Dataset):
 
 
 def collate_fn(batch):
-    images, lengths, answers, _ = [], [], [], []
+    images, lengths, answers, families = [], [], [], []
     batch_size = len(batch)
 
     max_len = max(map(lambda x: len(x[1]), batch))
@@ -53,10 +55,49 @@ def collate_fn(batch):
     for i, b in enumerate(sort_by_len):
         image, question, length, answer, family = b
         images.append(image)
+        families.append(family)
         length = len(question)
         questions[i, :length] = question
         lengths.append(length)
         answers.append(answer)
 
-    return {'image': torch.stack(images), 'question': torch.from_numpy(questions),
+    return {'image': torch.stack(images), 'question': torch.from_numpy(questions), 'family': families,
             'answer': torch.LongTensor(answers), 'question_length': lengths}
+
+class ClevrDialogDataset(ClevrDataset):
+    def __init__(self, data_dir, split='train'):
+        super(ClevrDialogDataset, self).__init__(data_dir, split)
+    
+    def __getitem__(self, index):
+        imgfile, questions, answers, templates = self.data[index]
+        id = int(imgfile.rsplit('_', 1)[1][:-4])
+        img = torch.from_numpy(self.img[id])
+
+        return img, questions, [len(q) for q in questions], answers, templates
+    
+    @staticmethod
+    def collate_fn(batch):
+        images = []
+        families = []
+        batch_size = len(batch)
+
+        max_len = -1
+        for b in batch:
+            max_len = max(max_len, max(b[2]))
+
+        questions = np.zeros((10, batch_size, max_len), dtype=np.int64) # normalize all sentences to size of the longest sentence
+        question_lens = np.zeros((10, batch_size))
+        answers = np.zeros((10, batch_size), dtype=np.int64)
+
+        for i,b in enumerate(batch):
+            img, qs, lens, ans, fam = b
+            images.append(img)
+            families.append(fam)
+
+            for j, (q, l, a) in enumerate(zip(qs, lens, ans)):
+                questions[j, i, :l] = q
+                question_lens[j, i] = l
+                answers[j, i] = a
+        
+        return {'image': torch.stack(images), 'question': torch.from_numpy(questions), 'family': families,
+                'answer': torch.LongTensor(answers.flatten()), 'question_length': torch.LongTensor(question_lens)}

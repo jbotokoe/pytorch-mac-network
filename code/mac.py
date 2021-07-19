@@ -36,7 +36,10 @@ class ControlUnit(nn.Module):
 
         self.control_input_u = nn.ModuleList()
         for i in range(max_step):
-            self.control_input_u.append(nn.Linear(module_dim, module_dim))
+            if self.cfg.TRAIN.CLEVR_DIALOG:
+                self.control_input_u.append(nn.Linear(2*module_dim, module_dim))
+            else:
+                self.control_input_u.append(nn.Linear(module_dim, module_dim))
 
         self.module_dim = module_dim
 
@@ -48,7 +51,7 @@ class ControlUnit(nn.Module):
         mask = (ones - mask) * (1e-30)
         return mask
 
-    def forward(self, question, context, question_lengths, step):
+    def forward(self, question, context, control, question_lengths, step):
         """
         Args:
             question: external inputs to control unit (the question vector).
@@ -62,6 +65,8 @@ class ControlUnit(nn.Module):
         """
         # compute interactions with question words
         question = self.control_input(question)
+        if self.cfg.TRAIN.CLEVR_DIALOG:
+            question = torch.cat([control, question], dim=1)
         question = self.control_input_u[step](question)
 
         newContControl = question
@@ -187,17 +192,45 @@ class MACUnit(nn.Module):
         return initial_control, initial_memory, memDpMask
 
     def forward(self, context, question, knowledge, question_lengths):
-        batch_size = question.size(0)
-        control, memory, memDpMask = self.zero_state(batch_size, question)
-
-        for i in range(self.max_step):
+        if self.cfg.TRAIN.CLEVR_DIALOG:
+            batch_size = question.size(0)
+            control, memory, memDpMask = self.zero_state(batch_size, question)
+            true_bs = question_lengths.shape[1]
+            T = question_lengths.shape[0]
+            
+            control_history = []
+            for i in range(self.max_step):
             # control unit
-            control = self.control(question, context, question_lengths, i)
-            # read unit
-            info = self.read(memory, knowledge, control, memDpMask)
-            # write unit
-            memory = self.write(memory, info)
+                control = self.control(question, context, control, question_lengths, i) # processes the ith step for each question
+                control_history.append(control) # appends all ith steps to the control history
+            control_history = torch.stack(control_history, 1)
 
+            _, memory, memDpMask = self.zero_state(true_bs, question)
+            control_history  = control_history .view(T, true_bs, self.max_step, self.module_dim)
+            knowledge = knowledge.contiguous().view(T, true_bs, knowledge.shape[1], knowledge.shape[2])
+            memory_ = []
+            for t in range(T):
+                for i in range(self.max_step):
+                    # control unit
+                    control = control_history[t, :, i] # get control for turn in step i
+                    # read unit
+                    info = self.read(memory, knowledge[t,:], control, memDpMask)
+                    # write unit
+                    memory = self.write(memory, info)
+                memory_.append(memory) # append memory
+            memory = torch.stack(memory_, dim=0).view(-1, *(memory.shape[1:])) # stack memories at the end to feed output unit
+            return memory
+        else:
+            batch_size = question.size(0)
+            control, memory, memDpMask = self.zero_state(batch_size, question)
+
+            for i in range(self.max_step):
+                # control unit
+                control = self.control(question, context, control, question_lengths, i)
+                # read unit
+                info = self.read(memory, knowledge, control, memDpMask)
+                # write unit
+                memory = self.write(memory, info)
         return memory
 
 
@@ -225,6 +258,10 @@ class InputUnit(nn.Module):
         self.question_dropout = nn.Dropout(p=0.08)
 
     def forward(self, image, question, question_len):
+        if self.cfg.TRAIN.CLEVR_DIALOG:
+            image = image.repeat((question.shape[0], 1, 1, 1))
+            question = question.view(-1, question.shape[2]) # batch decomposition ([t, b, max_len(all_questions)]) -> ([b*t, max_len(all_questions)])
+            question_len = question_len.view(-1)
         b_size = question.size(0)
 
         # get image features
@@ -235,7 +272,7 @@ class InputUnit(nn.Module):
         # get question and contextual word embeddings
         embed = self.encoder_embed(question)
         embed = self.embedding_dropout(embed)
-        embed = nn.utils.rnn.pack_padded_sequence(embed, question_len, batch_first=True)
+        embed = nn.utils.rnn.pack_padded_sequence(embed, question_len, batch_first=True, enforce_sorted=False)
 
         contextual_words, (question_embedding, _) = self.encoder(embed)
         if self.bidirectional:
@@ -248,7 +285,7 @@ class InputUnit(nn.Module):
 
 
 class OutputUnit(nn.Module):
-    def __init__(self, module_dim=512, num_answers=28):
+    def __init__(self, module_dim=512, num_answers=29):
         super(OutputUnit, self).__init__()
 
         self.question_proj = nn.Linear(module_dim, module_dim)
@@ -288,7 +325,6 @@ class MACNetwork(nn.Module):
     def forward(self, image, question, question_len):
         # get image, word, and sentence embeddings
         question_embedding, contextual_words, img = self.input_unit(image, question, question_len)
-
         # apply MacCell
         memory = self.mac(contextual_words, question_embedding, img, question_len)
 

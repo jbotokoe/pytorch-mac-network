@@ -13,7 +13,7 @@ sys.path.append(dir_path)
 
 from config import cfg, cfg_from_file
 from mac import MACNetwork
-from datasets import ClevrDataset, collate_fn
+from datasets import ClevrDataset, ClevrDialogDataset, collate_fn
 from utils import load_vocab
 
 import argparse
@@ -52,9 +52,14 @@ def evaluate(args):
     if cfg.CUDA:
         model = model.cuda()
 
-    dataset_test = ClevrDataset(data_dir=args.data_dir, split='test')
-    dataloader_test = DataLoader(dataset=dataset_test, batch_size=64, drop_last=False,
-                                    shuffle=False, num_workers=0, collate_fn=collate_fn)
+    if cfg.TRAIN.CLEVR_DIALOG:
+        dataset_test = ClevrDialogDataset(data_dir=args.data_dir, split="test")
+        dataloader_test = DataLoader(dataset=dataset_test, batch_size=128, drop_last=False,
+                                        shuffle=False, num_workers=cfg.WORKERS, collate_fn=ClevrDialogDataset.collate_fn)            
+    else:
+        dataset_test = ClevrDataset(data_dir=args.data_dir, split='test')
+        dataloader_test = DataLoader(dataset=dataset_test, batch_size=64, drop_last=False,
+                                        shuffle=False, num_workers=cfg.WORKERS, collate_fn=collate_fn)
 
     correct = {}
     total_correct = {}

@@ -11,10 +11,10 @@ from tqdm import tqdm
 dir_path = (os.path.abspath(os.path.join(os.path.realpath(__file__), './.')))
 sys.path.append(dir_path)
 
-from code.config import cfg, cfg_from_file
-from code.mac import MACNetwork
-from code.datasets import ClevrDataset, collate_fn
-from code.utils import load_vocab
+from config import cfg, cfg_from_file
+from mac import MACNetwork
+from datasets import ClevrDataset, collate_fn
+from utils import load_vocab
 
 import argparse
 
@@ -87,9 +87,6 @@ def evaluate(args):
                 total_correct[family[i]] = 0
             correct[family[i]] += 1 if p==gt else 0 # if prediction == ground truth add 1
             total_correct[family[i]] += 1 # update amount of seen by 1
-        
-        if idx == 200:
-            break
 
     # calculate accuracy ifo template
     result = {'template': {}}

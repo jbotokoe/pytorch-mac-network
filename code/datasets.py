@@ -99,5 +99,7 @@ class ClevrDialogDataset(ClevrDataset):
                 question_lens[j, i] = l
                 answers[j, i] = a
         
+        families = families[0]
+        
         return {'image': torch.stack(images), 'question': torch.from_numpy(questions), 'family': families,
                 'answer': torch.LongTensor(answers.flatten()), 'question_length': torch.LongTensor(question_lens)}
